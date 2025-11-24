@@ -4,6 +4,7 @@ import { Lesson, Resource } from '../types';
 import { INITIAL_LESSONS } from '../constants';
 import { useAuth } from './AuthContext';
 import * as Security from '../services/security';
+import * as Crypto from '../services/crypto';
 
 interface DataContextType {
   lessons: Lesson[];
@@ -12,20 +13,55 @@ interface DataContextType {
   addResource: (lessonId: string, resource: Omit<Resource, 'id' | 'createdAt'>) => Promise<void>;
   updateResource: (lessonId: string, resource: Resource) => Promise<void>;
   deleteResource: (lessonId: string, resourceId: string) => Promise<void>;
+  loadingData: boolean;
 }
 
 const DataContext = createContext<DataContextType | undefined>(undefined);
 
 export const DataProvider = ({ children }: { children: ReactNode }) => {
   const { accessToken } = useAuth();
-  const [lessons, setLessons] = useState<Lesson[]>(() => {
-    const savedLessons = localStorage.getItem('bayan_lessons');
-    return savedLessons ? JSON.parse(savedLessons) : INITIAL_LESSONS;
-  });
+  const [lessons, setLessons] = useState<Lesson[]>([]);
+  const [loadingData, setLoadingData] = useState(true);
+  const [isInitialized, setIsInitialized] = useState(false);
 
+  // Load lessons from encrypted storage
   useEffect(() => {
-    localStorage.setItem('bayan_lessons', JSON.stringify(lessons));
-  }, [lessons]);
+    const loadLessons = async () => {
+      try {
+        const savedLessons = localStorage.getItem('bayan_lessons_encrypted');
+        if (savedLessons) {
+          const decrypted = await Crypto.decryptData<Lesson[]>(savedLessons);
+          if (decrypted) {
+            setLessons(decrypted);
+          } else {
+            setLessons(INITIAL_LESSONS);
+          }
+        } else {
+          setLessons(INITIAL_LESSONS);
+        }
+      } catch (e) {
+        setLessons(INITIAL_LESSONS);
+      } finally {
+        setLoadingData(false);
+        setIsInitialized(true);
+      }
+    };
+    loadLessons();
+  }, []);
+
+  // Save lessons to storage (encrypted)
+  useEffect(() => {
+    const saveLessons = async () => {
+      if (lessons.length > 0 || isInitialized) { // Save only if initialized to prevent overwriting with []
+        const encrypted = await Crypto.encryptData(lessons);
+        localStorage.setItem('bayan_lessons_encrypted', encrypted);
+      }
+    };
+    
+    if (isInitialized) {
+        saveLessons();
+    }
+  }, [lessons, isInitialized]);
 
   // Security Gate: Verify Token before any mutation
   const verifyPermissions = async () => {
@@ -39,7 +75,6 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
       throw new Error("Access Denied: Invalid or expired token.");
     }
 
-    // Optional: Role based check
     if (payload.role !== 'admin') {
       throw new Error("Access Denied: Insufficient permissions.");
     }
@@ -99,7 +134,7 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
   };
 
   return (
-    <DataContext.Provider value={{ lessons, addLesson, deleteLesson, addResource, updateResource, deleteResource }}>
+    <DataContext.Provider value={{ lessons, addLesson, deleteLesson, addResource, updateResource, deleteResource, loadingData }}>
       {children}
     </DataContext.Provider>
   );

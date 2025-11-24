@@ -3,6 +3,7 @@ import React, { createContext, useContext, useState, useEffect, ReactNode } from
 import { User } from '../types';
 import { INITIAL_USERS } from '../constants';
 import * as Security from '../services/security';
+import * as Crypto from '../services/crypto';
 
 interface AuthContextType {
   user: User | null;
@@ -10,9 +11,9 @@ interface AuthContextType {
   login: (email: string, pass: string) => Promise<boolean>;
   logout: () => void;
   allUsers: User[];
-  addUser: (user: Omit<User, 'id'>) => void;
-  updateUser: (user: User) => void;
-  deleteUser: (id: string) => void;
+  addUser: (user: Omit<User, 'id'>) => Promise<void>;
+  updateUser: (user: User) => Promise<void>;
+  deleteUser: (id: string) => Promise<void>;
   isInitialized: boolean;
 }
 
@@ -21,57 +22,94 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
-  const [allUsers, setAllUsers] = useState<User[]>(() => {
-    const savedUsers = localStorage.getItem('bayan_users');
-    return savedUsers ? JSON.parse(savedUsers) : INITIAL_USERS;
-  });
+  const [allUsers, setAllUsers] = useState<User[]>([]);
   const [isInitialized, setIsInitialized] = useState(false);
 
-  // Persistence for Users (Database simulation)
+  // Load users from storage (encrypted) or fallback to initial
   useEffect(() => {
-    localStorage.setItem('bayan_users', JSON.stringify(allUsers));
-  }, [allUsers]);
+    const loadUsers = async () => {
+      const storedEncryptedUsers = localStorage.getItem('bayan_users_encrypted');
+      
+      if (storedEncryptedUsers) {
+        const decryptedUsers = await Crypto.decryptData<User[]>(storedEncryptedUsers);
+        if (decryptedUsers) {
+          setAllUsers(decryptedUsers);
+        } else {
+          // Fallback if decryption fails
+          setAllUsers(INITIAL_USERS);
+        }
+      } else {
+        setAllUsers(INITIAL_USERS);
+      }
+    };
+    loadUsers();
+  }, []);
 
-  // Session Restoration (Simulating HttpOnly Cookie check on load)
+  // Save users to storage (encrypted) whenever it changes
+  useEffect(() => {
+    const saveUsers = async () => {
+      if (allUsers.length > 0) {
+        const encrypted = await Crypto.encryptData(allUsers);
+        localStorage.setItem('bayan_users_encrypted', encrypted);
+      }
+    };
+    if (isInitialized) { // Only save after initial load to avoid overwriting with empty
+       saveUsers();
+    }
+  }, [allUsers, isInitialized]);
+
+  // Session Restoration
   useEffect(() => {
     const restoreSession = async () => {
-      // In a real app, the refresh token is in an HttpOnly cookie, not accessible to JS.
-      // Here we use localStorage to simulate persistence across reloads.
       const storedRefreshToken = localStorage.getItem('bayan_refresh_token');
       
       if (storedRefreshToken) {
         const payload = await Security.verifyToken(storedRefreshToken);
         if (payload && payload.sub) {
-          const foundUser = allUsers.find(u => u.id === payload.sub);
-          if (foundUser) {
-            // Generate new short-lived access token
-            const newAccessToken = await Security.generateAccessToken(foundUser);
-            setAccessToken(newAccessToken);
-            setUser(foundUser);
-          }
+          // Note: accessing allUsers state inside useEffect directly might be stale if not dependent,
+          // but since allUsers loads async, we might need to wait.
+          // For simplicity in this flow, we rely on the fact that allUsers will load roughly same time.
+          // A better approach is to wait for users to be loaded.
         }
       }
       setIsInitialized(true);
     };
     
     restoreSession();
-  }, [allUsers]);
+  }, []);
+
+  // Effect to sync user if allUsers loads later than session restore
+  useEffect(() => {
+    const syncUser = async () => {
+      const storedRefreshToken = localStorage.getItem('bayan_refresh_token');
+      if (storedRefreshToken && allUsers.length > 0 && !user) {
+         const payload = await Security.verifyToken(storedRefreshToken);
+         if (payload && payload.sub) {
+            const foundUser = allUsers.find(u => u.id === payload.sub);
+            if (foundUser) {
+              const newAccessToken = await Security.generateAccessToken(foundUser);
+              setAccessToken(newAccessToken);
+              setUser(foundUser);
+            }
+         }
+      }
+    };
+    syncUser();
+  }, [allUsers, user]);
 
   const login = async (email: string, pass: string): Promise<boolean> => {
+    const hashedPassword = await Crypto.hashPassword(pass);
+    
     const foundUser = allUsers.find(
-      u => u.email.toLowerCase() === email.toLowerCase() && u.password === pass
+      u => u.email.toLowerCase() === email.toLowerCase() && u.password === hashedPassword
     );
 
     if (foundUser) {
-      // 1. Generate Tokens
       const newAccessToken = await Security.generateAccessToken(foundUser);
       const newRefreshToken = await Security.generateRefreshToken(foundUser.id);
 
-      // 2. Store Access Token in Memory (Secure against XSS)
       setAccessToken(newAccessToken);
       setUser(foundUser);
-
-      // 3. Store Refresh Token (Simulate HttpOnly Cookie)
       localStorage.setItem('bayan_refresh_token', newRefreshToken);
       
       return true;
@@ -85,19 +123,42 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     localStorage.removeItem('bayan_refresh_token');
   };
 
-  const addUser = (newUser: Omit<User, 'id'>) => {
-    const userWithId = { ...newUser, id: Date.now().toString() };
-    setAllUsers([...allUsers, userWithId]);
+  const addUser = async (newUser: Omit<User, 'id'>) => {
+    // Hash the password before saving
+    const hashedPassword = newUser.password ? await Crypto.hashPassword(newUser.password) : undefined;
+    const userWithId = { 
+      ...newUser, 
+      password: hashedPassword,
+      id: Date.now().toString() 
+    };
+    setAllUsers(prev => [...prev, userWithId]);
   };
 
-  const updateUser = (updatedUser: User) => {
-    setAllUsers(users => users.map(u => (u.id === updatedUser.id ? updatedUser : u)));
-    if (user && user.id === updatedUser.id) {
-      setUser(updatedUser);
+  const updateUser = async (updatedUser: User) => {
+    // Check if password changed (simple check: if it doesn't match existing hash format or we assume it's a new plain text)
+    // In this simple app, the AdminDashboard sends plain text if changed.
+    // We need to know if it's already hashed. 
+    // SHA-256 hex is 64 chars. If input is different from current stored, we hash it.
+    
+    const currentUser = allUsers.find(u => u.id === updatedUser.id);
+    let finalPassword = updatedUser.password;
+
+    if (currentUser && updatedUser.password !== currentUser.password) {
+       // Password has changed, so hash the new one
+       if (updatedUser.password) {
+         finalPassword = await Crypto.hashPassword(updatedUser.password);
+       }
+    }
+
+    const userToSave = { ...updatedUser, password: finalPassword };
+
+    setAllUsers(users => users.map(u => (u.id === userToSave.id ? userToSave : u)));
+    if (user && user.id === userToSave.id) {
+      setUser(userToSave);
     }
   };
 
-  const deleteUser = (id: string) => {
+  const deleteUser = async (id: string) => {
     if (id === "admin-1") return; 
     setAllUsers(users => users.filter(u => u.id !== id));
   };

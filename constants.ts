@@ -1,8 +1,26 @@
+
 import { Lesson, User } from './types';
 
+// Passwords are pre-hashed with SHA-256
+// 'admin' -> 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+// '123' -> a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3
+
 export const INITIAL_USERS: User[] = [
-  { id: "admin-1", name: "عمر أيت لوتو", email: "omar.aitloutou@ista.ma", password: "admin", role: "admin" },
-  { id: "trainee-1", name: "أحمد طالب", email: "student@ista.ma", password: "123", role: "trainee", specialization: "تطوير رقمي" }
+  { 
+    id: "admin-1", 
+    name: "عمر أيت لوتو", 
+    email: "omar.aitloutou@ista.ma", 
+    password: "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918", 
+    role: "admin" 
+  },
+  { 
+    id: "trainee-1", 
+    name: "أحمد طالب", 
+    email: "student@ista.ma", 
+    password: "a665a45920422f9d417e4867efdc4fb8a04a1f3fff1fa07e998e86f7f7a27ae3", 
+    role: "trainee", 
+    specialization: "تطوير رقمي" 
+  }
 ];
 
 export const INITIAL_LESSONS: Lesson[] = [
