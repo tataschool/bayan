@@ -14,7 +14,7 @@
     "@google/genai": "^1.30.0",
     "lucide-react": "^0.554.0",
     "react-router-dom": "^7.9.6",
-    "jose": "^5.2.0"
+    "jose": "^6.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
