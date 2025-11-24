@@ -1,6 +1,10 @@
-const fs = require('fs');
-const path = require('path');
-const https = require('https');
+import fs from 'fs';
+import path from 'path';
+import https from 'https';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const ASSETS_DIR = path.join(__dirname, '..', 'dist', 'assets');
 
@@ -14,7 +18,7 @@ const downloadFile = (url, filename, headers = {}) => {
   return new Promise((resolve, reject) => {
     const filePath = path.join(ASSETS_DIR, filename);
     const file = fs.createWriteStream(filePath);
-    
+
     const urlObj = new URL(url);
     const options = {
       hostname: urlObj.hostname,
@@ -26,7 +30,29 @@ const downloadFile = (url, filename, headers = {}) => {
     };
 
     https.get(options, (response) => {
+      // Handle Redirects
+      if (response.statusCode === 301 || response.statusCode === 302) {
+        file.close();
+        fs.unlink(filePath, () => { }); // Delete empty file
+        if (response.headers.location) {
+          // Resolve relative URLs
+          const redirectUrl = response.headers.location.startsWith('http')
+            ? response.headers.location
+            : new URL(response.headers.location, url).href;
+          console.log(`Redirecting to: ${redirectUrl}`);
+          downloadFile(redirectUrl, filename, headers)
+            .then(resolve)
+            .catch(reject);
+          return;
+        } else {
+          reject(new Error(`Redirect with no location header for '${url}'`));
+          return;
+        }
+      }
+
       if (response.statusCode !== 200) {
+        file.close();
+        fs.unlink(filePath, () => { });
         reject(new Error(`Failed to get '${url}' (${response.statusCode})`));
         return;
       }
@@ -37,7 +63,8 @@ const downloadFile = (url, filename, headers = {}) => {
         resolve();
       });
     }).on('error', (err) => {
-      fs.unlink(filePath, () => {});
+      file.close();
+      fs.unlink(filePath, () => { });
       reject(err);
     });
   });
@@ -46,42 +73,42 @@ const downloadFile = (url, filename, headers = {}) => {
 // 1. Javascript Libraries (Using esm.sh with ?bundle to inline dependencies)
 // WE USE REACT 18.3.1 for maximum stability with manual ESM linking
 const libraries = [
-  { 
-    name: 'react.js', 
-    url: 'https://esm.sh/react@18.3.1?target=es2022&bundle' 
+  {
+    name: 'react.js',
+    url: 'https://esm.sh/react@18.3.1?target=es2022&bundle'
   },
   {
     name: 'react-jsx-runtime.js',
     // Strictly depend on the main react package to avoid duplication
     url: 'https://esm.sh/react@18.3.1/jsx-runtime?target=es2022&bundle&deps=react@18.3.1'
   },
-  { 
+  {
     // Main React DOM
-    name: 'react-dom.js', 
-    url: 'https://esm.sh/react-dom@18.3.1?target=es2022&bundle&deps=react@18.3.1' 
+    name: 'react-dom.js',
+    url: 'https://esm.sh/react-dom@18.3.1?target=es2022&bundle&deps=react@18.3.1'
   },
-  { 
+  {
     // React DOM Client (Essential for React 18+)
     // It MUST depend on react-dom main bundle to share internals
-    name: 'react-dom-client.js', 
-    url: 'https://esm.sh/react-dom@18.3.1/client?target=es2022&bundle&deps=react@18.3.1,react-dom@18.3.1' 
+    name: 'react-dom-client.js',
+    url: 'https://esm.sh/react-dom@18.3.1/client?target=es2022&bundle&deps=react@18.3.1,react-dom@18.3.1'
   },
-  { 
-    name: 'react-router-dom.js', 
+  {
+    name: 'react-router-dom.js',
     // Router v6.22.3 is very stable with React 18
-    url: 'https://esm.sh/react-router-dom@6.22.3?target=es2022&bundle&deps=react@18.3.1,react-dom@18.3.1' 
+    url: 'https://esm.sh/react-router-dom@6.22.3?target=es2022&bundle&deps=react@18.3.1,react-dom@18.3.1'
   },
-  { 
-    name: 'lucide-react.js', 
-    url: 'https://esm.sh/lucide-react@0.344.0?target=es2022&bundle&deps=react@18.3.1' 
+  {
+    name: 'lucide-react.js',
+    url: 'https://esm.sh/lucide-react@0.344.0?target=es2022&bundle&deps=react@18.3.1'
   },
-  { 
-    name: 'google-genai.js', 
-    url: 'https://esm.sh/@google/genai@0.1.1?target=es2022&bundle' 
+  {
+    name: 'google-genai.js',
+    url: 'https://esm.sh/@google/genai@1.30.0?target=es2022&bundle'
   },
-  { 
-    name: 'jose.js', 
-    url: 'https://esm.sh/jose@5.2.2?target=es2022&bundle' 
+  {
+    name: 'jose.js',
+    url: 'https://esm.sh/jose@6.1.2?target=es2022&bundle'
   },
   {
     name: 'scheduler.js',
@@ -98,7 +125,7 @@ const libraries = [
 const downloadFonts = async () => {
   console.log('Downloading Fonts...');
   const cssUrl = 'https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;800&display=swap';
-  
+
   return new Promise((resolve, reject) => {
     const options = {
       headers: {
@@ -131,17 +158,17 @@ const downloadFonts = async () => {
           const originalUrl = match[1];
           const extension = originalUrl.split('.').pop() || 'woff2';
           const fontFilename = `cairo-${counter}.${extension}`;
-          
+
           // Replace URL in CSS with local path
           newCssContent = newCssContent.replace(originalUrl, `./${fontFilename}`);
-          
+
           // Download font file
           downloads.push(downloadFile(originalUrl, fontFilename));
           counter++;
         }
 
         await Promise.all(downloads);
-        
+
         // Save modified CSS
         fs.writeFileSync(path.join(ASSETS_DIR, 'cairo.css'), newCssContent);
         console.log(`Fonts downloaded and CSS updated (${counter} files).`);
@@ -154,10 +181,10 @@ const downloadFonts = async () => {
 const main = async () => {
   try {
     console.log('Starting asset download...');
-    
+
     // Download Libraries
     await Promise.all(libraries.map(lib => downloadFile(lib.url, lib.name)));
-    
+
     // Download Fonts
     await downloadFonts();
 
