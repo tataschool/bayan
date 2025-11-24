@@ -14,6 +14,7 @@ interface AuthContextType {
   addUser: (user: Omit<User, 'id'>) => Promise<void>;
   updateUser: (user: User) => Promise<void>;
   deleteUser: (id: string) => Promise<void>;
+  importUsers: (users: User[]) => Promise<void>;
   isInitialized: boolean;
 }
 
@@ -163,6 +164,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setAllUsers(users => users.filter(u => u.id !== id));
   };
 
+  const importUsers = async (users: User[]) => {
+    if (Array.isArray(users)) {
+      setAllUsers(users);
+    }
+  };
+
   return (
     <AuthContext.Provider value={{ 
       user, 
@@ -173,6 +180,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       addUser, 
       updateUser, 
       deleteUser,
+      importUsers,
       isInitialized 
     }}>
       {children}

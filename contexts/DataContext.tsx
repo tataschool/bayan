@@ -13,6 +13,7 @@ interface DataContextType {
   addResource: (lessonId: string, resource: Omit<Resource, 'id' | 'createdAt'>) => Promise<void>;
   updateResource: (lessonId: string, resource: Resource) => Promise<void>;
   deleteResource: (lessonId: string, resourceId: string) => Promise<void>;
+  importLessons: (lessons: Lesson[]) => Promise<void>;
   loadingData: boolean;
 }
 
@@ -133,8 +134,15 @@ export const DataProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  const importLessons = async (newLessons: Lesson[]) => {
+    await verifyPermissions();
+    if (Array.isArray(newLessons)) {
+      setLessons(newLessons);
+    }
+  }
+
   return (
-    <DataContext.Provider value={{ lessons, addLesson, deleteLesson, addResource, updateResource, deleteResource, loadingData }}>
+    <DataContext.Provider value={{ lessons, addLesson, deleteLesson, addResource, updateResource, deleteResource, importLessons, loadingData }}>
       {children}
     </DataContext.Provider>
   );

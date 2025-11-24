@@ -1,16 +1,19 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { Moon, Sun, LogOut, Menu, X, Shield, User as UserIcon, Info, LogIn, BookOpen } from 'lucide-react';
+import { useData } from '../contexts/DataContext';
+import { Moon, Sun, LogOut, Menu, X, Shield, User as UserIcon, Info, LogIn, BookOpen, Download, Upload } from 'lucide-react';
 
 export const Layout = ({ children }: { children: React.ReactNode }) => {
-  const { user, logout } = useAuth();
+  const { user, logout, allUsers, importUsers } = useAuth();
+  const { lessons, importLessons } = useData();
   const location = useLocation();
   const navigate = useNavigate();
   const [isDark, setIsDark] = useState(localStorage.getItem('theme') !== 'light');
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const root = window.document.documentElement;
@@ -32,6 +35,62 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
   const handleLogout = () => {
     logout();
     navigate('/login');
+  };
+
+  const handleExport = () => {
+    const data = {
+      users: allUsers,
+      lessons: lessons,
+      metadata: {
+        version: "1.0",
+        exportDate: new Date().toISOString(),
+        exportedBy: user?.email
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bayan_backup_${new Date().toISOString().split('T')[0]}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportClick = () => {
+    if (fileInputRef.current) {
+      fileInputRef.current.click();
+    }
+  };
+
+  const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+
+      if (data.users && Array.isArray(data.users)) {
+        await importUsers(data.users);
+      }
+      
+      if (data.lessons && Array.isArray(data.lessons)) {
+        await importLessons(data.lessons);
+      }
+
+      alert('تم استيراد البيانات بنجاح!');
+      // Refresh page to ensure everything is synced visually if needed, though context updates should handle it.
+      // navigate(0); 
+    } catch (error) {
+      console.error("Import error:", error);
+      alert('حدث خطأ أثناء استيراد الملف. تأكد من صحة الملف.');
+    } finally {
+      // Reset input
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   if (location.pathname === '/login') {
@@ -116,17 +175,52 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
               )}
 
               {user?.role === 'admin' && (
-                <Link 
-                  to={location.pathname.includes('/admin') ? '/dashboard' : '/admin'}
-                  className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm hover:shadow-md ${
-                    location.pathname.includes('/admin')
-                      ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                      : scrolled ? 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700' : 'bg-white/10 text-white hover:bg-white/20'
-                  }`}
-                >
-                  <Shield className="h-4 w-4" />
-                  {location.pathname.includes('/admin') ? 'العودة للدروس' : 'لوحة التحكم'}
-                </Link>
+                <>
+                  <Link 
+                    to={location.pathname.includes('/admin') ? '/dashboard' : '/admin'}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all shadow-sm hover:shadow-md ${
+                      location.pathname.includes('/admin')
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : scrolled ? 'bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700' : 'bg-white/10 text-white hover:bg-white/20'
+                    }`}
+                  >
+                    <Shield className="h-4 w-4" />
+                    {location.pathname.includes('/admin') ? 'العودة للدروس' : 'لوحة التحكم'}
+                  </Link>
+                  
+                  {/* Admin Data Controls */}
+                  <div className={`flex items-center border-r border-l ${scrolled ? 'border-slate-200 dark:border-slate-700' : 'border-white/20'} px-2 mx-1`}>
+                    <button 
+                      onClick={handleImportClick}
+                      className={`p-2 rounded-full transition-colors ${
+                        scrolled 
+                          ? 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800' 
+                          : 'text-slate-200 hover:bg-white/10'
+                      }`}
+                      title="استيراد البيانات"
+                    >
+                      <Upload className="h-5 w-5" />
+                    </button>
+                    <input 
+                      type="file" 
+                      ref={fileInputRef} 
+                      onChange={handleFileChange} 
+                      className="hidden" 
+                      accept="application/json"
+                    />
+                    <button 
+                      onClick={handleExport}
+                      className={`p-2 rounded-full transition-colors ${
+                        scrolled 
+                          ? 'text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800' 
+                          : 'text-slate-200 hover:bg-white/10'
+                      }`}
+                      title="تصدير البيانات"
+                    >
+                      <Download className="h-5 w-5" />
+                    </button>
+                  </div>
+                </>
               )}
 
               {user ? (
@@ -207,14 +301,30 @@ export const Layout = ({ children }: { children: React.ReactNode }) => {
               )}
 
               {user?.role === 'admin' && (
-                <Link 
-                  to={location.pathname.includes('/admin') ? '/dashboard' : '/admin'}
-                  onClick={() => setIsMobileMenuOpen(false)}
-                  className="flex items-center gap-3 p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 font-medium"
-                >
-                  <Shield className="h-5 w-5" />
-                  {location.pathname.includes('/admin') ? 'الواجهة الرئيسية' : 'لوحة التحكم'}
-                </Link>
+                <>
+                  <Link 
+                    to={location.pathname.includes('/admin') ? '/dashboard' : '/admin'}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    className="flex items-center gap-3 p-3 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-700 dark:text-indigo-300 font-medium"
+                  >
+                    <Shield className="h-5 w-5" />
+                    {location.pathname.includes('/admin') ? 'الواجهة الرئيسية' : 'لوحة التحكم'}
+                  </Link>
+                  <div className="flex gap-2">
+                     <button 
+                        onClick={handleImportClick}
+                        className="flex-1 flex items-center justify-center gap-2 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium"
+                      >
+                        <Upload className="h-5 w-5" /> استيراد
+                      </button>
+                      <button 
+                        onClick={handleExport}
+                        className="flex-1 flex items-center justify-center gap-2 p-3 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 font-medium"
+                      >
+                        <Download className="h-5 w-5" /> تصدير
+                      </button>
+                  </div>
+                </>
               )}
 
               {user ? (
